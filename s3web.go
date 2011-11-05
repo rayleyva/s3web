@@ -45,6 +45,7 @@ var (
 	rootDir      string
 	httpAddr     = flag.String("http", ":8080", "serve locally at this address")
 	dryRun       = flag.Bool("n", false, "Dry run.  Don't upload or delete during deploy")
+	defaultType  = flag.String("defaultType", "text/html; charset=utf-8", "Default content type")
 	ignoredError = errors.New("s3web: file ignored")
 )
 
@@ -138,7 +139,11 @@ func readKey(key string) ([]byte, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	return b, mime.TypeByExtension(path.Ext(fname)), nil
+	mimeType := mime.TypeByExtension(path.Ext(fname))
+	if mimeType == "" {
+		mimeType = *defaultType
+	}
+	return b, mimeType, nil
 }
 
 func rootHandler(req *web.Request) {
@@ -213,7 +218,6 @@ func doDeploy() {
 	for _, item := range contents.Contents {
 		sums[item.Key] = item.Etag[1 : len(item.Etag)-1]
 	}
-	log.Println(sums)
 
 	err = filepath.Walk(rootDir, func(fname string, info *os.FileInfo, err error) error {
 		if err != nil {
