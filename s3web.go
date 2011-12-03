@@ -219,18 +219,18 @@ func doDeploy() {
 		sums[item.Key] = item.Etag[1 : len(item.Etag)-1]
 	}
 
-	err = filepath.Walk(rootDir, func(fname string, info *os.FileInfo, err error) error {
+	err = filepath.Walk(rootDir, func(fname string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if info.IsDirectory() {
+		if info.IsDir() {
 			_, name := filepath.Split(fname)
 			if name[0] == '.' {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if !info.IsRegular() {
+		if !!info.IsDir() {
 			return nil
 		}
 		key := filepath.ToSlash(fname[1+len(rootDir):])
@@ -245,7 +245,7 @@ func doDeploy() {
 
 		h := md5.New()
 		h.Write(data)
-		sum := hex.EncodeToString(h.Sum())
+		sum := hex.EncodeToString(h.Sum(nil))
 
 		if sums[key] != sum {
 			log.Printf("Uploading %s %s %d", key, mimeType, len(data))
