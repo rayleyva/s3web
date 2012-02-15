@@ -24,8 +24,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/garyburd/twister/server"
-	"github.com/garyburd/twister/web"
+	"github.com/garyburd/t2/server"
+	"github.com/garyburd/t2/web"
 	"io"
 	"io/ioutil"
 	"launchpad.net/goamz/aws"
@@ -146,7 +146,7 @@ func readKey(key string) ([]byte, string, error) {
 	return b, mimeType, nil
 }
 
-func rootHandler(req *web.Request) {
+func rootHandler(resp web.Response, req *web.Request) error {
 
 	key := req.URL.Path[1:]
 	if key == "" {
@@ -160,14 +160,18 @@ func rootHandler(req *web.Request) {
 		b, mimeType, err = readKey(config.Error)
 	}
 	if err != nil {
-		req.Error(web.StatusNotFound, err)
-		return
+		return &web.Error{Status: web.StatusNotFound, Reason: err}
 	}
 
-	w := req.Respond(status,
-		web.HeaderContentLength, strconv.Itoa(len(b)),
-		web.HeaderContentType, mimeType)
-	w.Write(b)
+	w, err := resp.Start(status, web.Header{
+		web.HeaderContentLength: {strconv.Itoa(len(b))},
+		web.HeaderContentType:   {mimeType},
+	})
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(b)
+	return err
 }
 
 func doServe() {
@@ -198,15 +202,19 @@ func doDeploy() {
 
 	// Get etags of items in bucket
 
-	data, err := bucket.GetReader("/")
+	r, err := bucket.GetReader("/")
 	if err != nil {
 		log.Fatalf("Error reading bucket, %v", err)
 	}
-	defer data.Close()
+	defer r.Close()
+	data, err := ioutil.ReadAll(r)
+	if err != nil {
+		log.Fatalf("Error reading bucket, %v", err)
+	}
 	var contents struct {
 		Contents []struct {
 			Key  string
-			Etag string
+			ETag string
 		}
 	}
 	err = xml.Unmarshal(data, &contents)
@@ -216,7 +224,7 @@ func doDeploy() {
 
 	sums := make(map[string]string, len(contents.Contents))
 	for _, item := range contents.Contents {
-		sums[item.Key] = item.Etag[1 : len(item.Etag)-1]
+		sums[item.Key] = item.ETag[1 : len(item.ETag)-1]
 	}
 
 	err = filepath.Walk(rootDir, func(fname string, info os.FileInfo, err error) error {
@@ -264,7 +272,7 @@ func doDeploy() {
 	if err != nil {
 		log.Fatalf("Error uploading, %v", err)
 	}
-	for key, _ := range sums {
+	for key := range sums {
 		log.Printf("Deleteing %s", key)
 		if !*dryRun {
 			err = bucket.Del("/" + key)
