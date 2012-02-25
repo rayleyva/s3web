@@ -82,7 +82,7 @@ func getSecret() (string, error) {
 	c.Stderr = &b
 	err := c.Run()
 	if err != nil {
-		if err, ok := err.(*exec.ExitError); ok && err.ExitStatus() != 0 {
+		if err, ok := err.(*exec.ExitError); ok && !err.Success() {
 			return "", errors.New(b.String())
 		}
 		return "", err
@@ -105,7 +105,7 @@ func setSecret(secret string) error {
 	c.Stderr = &b
 	err := c.Run()
 	if err != nil {
-		if err, ok := err.(*exec.ExitError); ok && err.ExitStatus() != 0 {
+		if err, ok := err.(*exec.ExitError); ok && !err.Success() {
 			return errors.New(b.String())
 		}
 		return err
@@ -163,13 +163,10 @@ func rootHandler(resp web.Response, req *web.Request) error {
 		return &web.Error{Status: web.StatusNotFound, Reason: err}
 	}
 
-	w, err := resp.Start(status, web.Header{
+	w := resp.Start(status, web.Header{
 		web.HeaderContentLength: {strconv.Itoa(len(b))},
 		web.HeaderContentType:   {mimeType},
 	})
-	if err != nil {
-		return err
-	}
 	_, err = w.Write(b)
 	return err
 }
