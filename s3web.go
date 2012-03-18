@@ -24,8 +24,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/garyburd/t2/server"
-	"github.com/garyburd/t2/web"
+	"github.com/garyburd/indigo/server"
+	"github.com/garyburd/indigo/web"
 	"io"
 	"io/ioutil"
 	"launchpad.net/goamz/aws"
@@ -45,20 +45,21 @@ var (
 	rootDir      string
 	httpAddr     = flag.String("http", ":8080", "serve locally at this address")
 	dryRun       = flag.Bool("n", false, "Dry run.  Don't upload or delete during deploy")
-	defaultType  = flag.String("defaultType", "text/html; charset=utf-8", "Default content type")
 	ignoredError = errors.New("s3web: file ignored")
 )
 
-var config struct {
-	Index     string
-	Error     string
-	Bucket    string
-	AccessKey string
-	Directory string
+var config = struct {
+	Index       string
+	Error       string
+	Bucket      string
+	AccessKey   string
+	DefaultType string
+}{
+	DefaultType: "text/html; charset=utf-8",
 }
 
 func readConfig() {
-	b, err := ioutil.ReadFile(flag.Arg(0))
+	b, err := ioutil.ReadFile(filepath.Join(rootDir, "_config.json"))
 	if err != nil {
 		log.Fatalf("Error reading configuration, %v", err)
 	}
@@ -66,8 +67,6 @@ func readConfig() {
 	if err != nil {
 		log.Fatalf("Error reading configuration, %v", err)
 	}
-	dir, _ := filepath.Split(flag.Arg(0))
-	rootDir = filepath.Clean(filepath.Join(dir, config.Directory))
 }
 
 var passRegexp = regexp.MustCompile(`password: "([^"]+)"`)
@@ -113,7 +112,7 @@ func setSecret(secret string) error {
 	return nil
 }
 
-func doSecret() {
+func runSecret() {
 	io.WriteString(os.Stdout, "Secret: ")
 	r := bufio.NewReader(os.Stdin)
 	b, isPrefix, err := r.ReadLine()
@@ -131,7 +130,7 @@ func doSecret() {
 
 func readKey(key string) ([]byte, string, error) {
 	_, name := path.Split(key)
-	if name[0] == '.' {
+	if name[0] == '.' || name[0] == '_' {
 		return nil, "", ignoredError
 	}
 	fname := filepath.Join(rootDir, filepath.FromSlash(key))
@@ -141,7 +140,7 @@ func readKey(key string) ([]byte, string, error) {
 	}
 	mimeType := mime.TypeByExtension(path.Ext(fname))
 	if mimeType == "" {
-		mimeType = *defaultType
+		mimeType = config.DefaultType
 	}
 	return b, mimeType, nil
 }
@@ -171,7 +170,7 @@ func rootHandler(resp web.Response, req *web.Request) error {
 	return err
 }
 
-func doServe() {
+func runTest() {
 	l, err := net.Listen("tcp", *httpAddr)
 	if err != nil {
 		log.Fatalf("Could not listen on %s, %v", *httpAddr, err)
@@ -190,7 +189,7 @@ func doServe() {
 	}
 }
 
-func doDeploy() {
+func runPush() {
 	secret, err := getSecret()
 	if err != nil {
 		log.Fatalf("Error reading secret, %v", err)
@@ -228,16 +227,18 @@ func doDeploy() {
 		if err != nil {
 			return err
 		}
-		if info.IsDir() {
-			_, name := filepath.Split(fname)
-			if name[0] == '.' {
+
+		if _, name := filepath.Split(fname); name[0] == '.' || name[0] == '_' {
+			if info.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if !!info.IsDir() {
+
+		if info.IsDir() {
 			return nil
 		}
+
 		key := filepath.ToSlash(fname[1+len(rootDir):])
 		data, mimeType, err := readKey(key)
 		if err != nil {
@@ -281,7 +282,7 @@ func doDeploy() {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "usage: s3web dir serve|deploy|secret\n")
+	fmt.Fprintf(os.Stderr, "usage: s3web dir serve|push|secret\n")
 	flag.PrintDefaults()
 	os.Exit(2)
 }
@@ -292,14 +293,20 @@ func main() {
 	if flag.NArg() != 2 {
 		usage()
 	}
+	var err error
+	rootDir, err = filepath.Abs(flag.Arg(0))
+	if err != nil {
+		log.Fatal(err)
+	}
+	rootDir = filepath.Clean(rootDir)
 	readConfig()
 	switch flag.Arg(1) {
 	case "secret":
-		doSecret()
-	case "serve":
-		doServe()
-	case "deploy":
-		doDeploy()
+		runSecret()
+	case "test":
+		runTest()
+	case "push":
+		runPush()
 	default:
 		usage()
 	}
